@@ -1,6 +1,8 @@
 # Scroll Canvas NFT minter
 
-This project is an automation script to facilitate the minting of NFTs Chain Pulse. The script uses proxy servers for enhanced security and dynamic gas price fetching.
+This project is an automation script to facilitate the minting of NFTs Chain Pulse + Ethereum Year NFT. The script uses proxy servers for enhanced security and dynamic gas price fetching.
+
+### Important note : If you encounter any errors while running the script, you should probably change your proxy in proxy.txt or change the Scroll RPC in .env file (https://chainlist.org/chain/534352)
 
 ## Table of Contents
 - [Prerequisites](#prerequisites)
@@ -22,8 +24,8 @@ This project is an automation script to facilitate the minting of NFTs Chain Pul
 1. Clone the repository:
    ```sh 
    bash
-   git clone https://github.com/yourusername/nft-minting-automation.git
-   cd nft-minting-automation
+   git clone https://github.com/ChoyV/ScrollCanvasMinter.git
+   cd ScrollCanvasMinter
    ```
 
 2. Install dependencies:
