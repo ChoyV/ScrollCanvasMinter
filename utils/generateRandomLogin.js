@@ -13,5 +13,24 @@ export function generateRandom() {
     const totalWordsCount = randomWordsCount();
     const randomNumber = getRandomInt(1, totalWordsCount); // Generate a random number
 
-    return `${randomWord}${randomNumber}`;
+    // Decide where to place the number: before, inside, or after the word
+    const placementOption = getRandomInt(1, 3); // 1: before, 2: inside, 3: after
+
+    let result;
+
+    switch (placementOption) {
+        case 1:
+            result = `${randomNumber}${randomWord}`; // Place number before the word
+            break;
+        case 2:
+            const splitIndex = getRandomInt(1, randomWord.length - 1); // Random index to split the word
+            result = `${randomWord.slice(0, splitIndex)}${randomNumber}${randomWord.slice(splitIndex)}`; // Place number inside the word
+            break;
+        case 3:
+        default:
+            result = `${randomWord}${randomNumber}`; // Place number after the word
+            break;
+    }
+
+    return result;
 }

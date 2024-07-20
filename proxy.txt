@@ -1,1 +1,0 @@
-FORMAT NEEDED : login:password@IP:PORT (string by string, use https) 
