@@ -12,9 +12,12 @@ import chalk from 'chalk';
 
 dotenv.config();
 
-const provider = new ethers.providers.JsonRpcProvider(process.env.RPC);
+const RPC_URLS = process.env.RPC.split(',');
+let currentRpcIndex = 0;
+let provider = new ethers.providers.JsonRpcProvider(RPC_URLS[currentRpcIndex]);
 
 const proxies = readProxies();
+let currentProxyIndex = 0;
 
 let abi, abiEthYear;
 try {
@@ -35,11 +38,13 @@ if (!contractAddress) {
 async function main() {
     try {
         const privateKeys = fs.readFileSync('wallets.txt', 'utf8').trim().split('\n');
+        if (process.env.WALLET_SHUFFLE === '1') {
+            shuffleArray(privateKeys);
+        }
         for (let i = 0; i < privateKeys.length; i++) {
             const privateKey = privateKeys[i];
-            const proxy = proxies[i % proxies.length];
             try {
-                await action(privateKey, provider, proxy);
+                await actionWithRetry(privateKey, 2);
             } catch (error) {
                 console.error(chalk.red(`Error with wallet ${privateKey}:`), error);
                 logToFile(`ERROR with wallet ${privateKey} - ${error}`);
@@ -48,11 +53,44 @@ async function main() {
             console.log(chalk.yellow(`Waiting for ${randomDelay} seconds...`));
             await new Promise(resolve => setTimeout(resolve, randomDelay * 1000));
         }
-        console.log(chalk.green('Process completed! You re all good'));
+        console.log(chalk.green('Process completed! You\'re all good'));
     } catch (error) {
         console.error(chalk.red('An unexpected error occurred:'), error);
         logToFile(`ERROR - ${error}`);
     }
+}
+
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
+async function actionWithRetry(privateKey, retries) {
+    let attempt = 0;
+    while (true) {
+        try {
+            await action(privateKey, provider, proxies[currentProxyIndex]);
+            return;
+        } catch (error) {
+            attempt++;
+            console.error(chalk.red(`Attempt ${attempt} failed:`), error);
+            logToFile(`ERROR - Attempt ${attempt} failed: ${error}`);
+            rotateRpcAndProxy();
+            console.log(chalk.yellow(`Rotating RPC URL to: ${RPC_URLS[currentRpcIndex]}`));
+            console.log(chalk.yellow(`Rotating Proxy to: ${proxies[currentProxyIndex].host}`));
+            if (attempt >= retries) {
+                throw new Error('All attempts failed');
+            }
+        }
+    }
+}
+
+function rotateRpcAndProxy() {
+    currentRpcIndex = (currentRpcIndex + 1) % RPC_URLS.length;
+    provider = new ethers.providers.JsonRpcProvider(RPC_URLS[currentRpcIndex]);
+    currentProxyIndex = (currentProxyIndex + 1) % proxies.length;
 }
 
 async function action(privateKey, provider, proxy) {
@@ -71,8 +109,7 @@ async function action(privateKey, provider, proxy) {
             console.log(chalk.orange("Not eligible"));
         }
     } catch (error) {
-        console.error(chalk.red('Error in action function:'), error);
-        logToFile(`ERROR - ${error}`);
+        throw new Error(`Error in action function: ${error.message}`);
     }
 }
 
@@ -93,28 +130,23 @@ async function mintProfile(wallet, contract, proxy) {
 
     const gasPrices = await getGasPrices(proxy);
     if (!gasPrices || !gasPrices.gasPrice || !gasPrices.maxPriorityFeePerGas) {
-        console.error(chalk.red('Failed to fetch gas prices'));
-        return;
+        throw new Error('Failed to fetch gas prices');
     }
 
     let gasLimit;
     try {
         gasLimit = await contract.estimateGas.mint(randomUsername, refData, { value: amountInWei });
     } catch (error) {
-        console.error(chalk.red('Failed to estimate gas limit:'), error);
-        logToFile(`ERROR - Failed to estimate gas limit: ${error}`);
-        return;
+        throw new Error(`Failed to estimate gas limit: ${error.message}`);
     }
 
     const transactionCost = gasLimit.mul(gasPrices.gasPrice).add(amountInWei);
 
     if (balance.lt(transactionCost)) {
-        console.error(chalk.red('Insufficient funds for transaction'));
-        logToFile(`ERROR - Insufficient funds for transaction - WALLET : ${wallet.address}`);
-        return;
+        throw new Error('Insufficient funds for transaction');
     }
 
-    logToFile(chalk.green(`Gas Price: ${ethers.utils.formatUnits(gasPrices.gasPrice, 'gwei')} gwei - WALLET : ${wallet.address}`));
+    logToFile(`Gas Price: ${ethers.utils.formatUnits(gasPrices.gasPrice, 'gwei')} gwei - WALLET : ${wallet.address}`);
 
     try {
         const txData = contract.interface.encodeFunctionData("mint", [randomUsername, refData]);
@@ -133,9 +165,7 @@ async function mintProfile(wallet, contract, proxy) {
         console.log(chalk.green('Successful mint!\nTransaction Hash:'), receipt.transactionHash);
         logToFile(`SUCCESS - Minted ${ethers.utils.formatUnits(amountInWei, 'ether')} ETH - Tx Hash: ${receipt.transactionHash} - WALLET : ${wallet.address}`);
     } catch (error) {
-        console.error(chalk.red('An error occurred during the minting process:'), error);
-        logToFile(`ERROR - ${error.message}`);
-        handleTransactionError(error);
+        throw new Error(`An error occurred during the minting process: ${error.message}`);
     }
 }
 
@@ -146,8 +176,7 @@ async function mintEthereumYear(wallet, proxy, provider) {
         const gasPrices = await getGasPrices(proxy);
 
         if (!gasPrices || !gasPrices.gasPrice || !gasPrices.maxPriorityFeePerGas) {
-            console.error(chalk.red('Failed to fetch gas prices'));
-            return;
+            throw new Error('Failed to fetch gas prices');
         }
 
         // Fixed gas limit
@@ -156,12 +185,10 @@ async function mintEthereumYear(wallet, proxy, provider) {
         const transactionCost = fixedGasLimit.mul(gasPrices.gasPrice);
 
         if (balance.lt(transactionCost)) {
-            console.error(chalk.red('Insufficient funds for transaction to mint EthereumYear'));
-            logToFile(`ERROR - Insufficient funds for transaction to mint EthereumYear - WALLET : ${wallet.address}`);
-            return;
+            throw new Error('Insufficient funds for transaction to mint EthereumYear');
         }
 
-        logToFile(chalk.green(`Gas Price: ${ethers.utils.formatUnits(gasPrices.gasPrice, 'gwei')} gwei - WALLET : ${wallet.address}`));
+        logToFile(`Gas Price: ${ethers.utils.formatUnits(gasPrices.gasPrice, 'gwei')} gwei - WALLET : ${wallet.address}`);
 
         const tx = {
             to: addressTo,
@@ -176,35 +203,7 @@ async function mintEthereumYear(wallet, proxy, provider) {
         console.log(chalk.green('Successful mint ETH_Year_NFT!\nTransaction Hash:'), receipt.transactionHash);
         logToFile(`SUCCESS - Minted ETH_Year_NFT - Tx Hash: ${receipt.transactionHash} - WALLET : ${wallet.address}`);
     } catch (error) {
-        console.error(chalk.red('Failed to send TX EthereumYear:'), error);
-        logToFile(`ERROR - Failed to send TX EthereumYear: ${error}`);
-    }
-}
-
-function handleTransactionError(error) {
-    console.error(chalk.red('An error occurred during the transaction:'), error);
-    logToFile(`ERROR - ${error.message}`);
-
-    if (error.code) {
-        console.error(chalk.red('Error Code:'), error.code);
-        logToFile(`ERROR CODE - ${error.code}`);
-    }
-    if (error.transaction) {
-        console.error(chalk.red('Error Transaction:'), error.transaction);
-        logToFile(`ERROR TRANSACTION - ${JSON.stringify(error.transaction)}`);
-    }
-    if (error.receipt) {
-        console.error(chalk.red('Error Receipt:'), error.receipt);
-        logToFile(`ERROR RECEIPT - ${JSON.stringify(error.receipt)}`);
-    }
-
-    if (error.body) {
-        const errorBody = JSON.parse(error.body);
-        if (errorBody.error && errorBody.error.data) {
-            const revertReason = decodeRevertReason(errorBody.error.data);
-            console.error(chalk.red('Revert Reason:'), revertReason);
-            logToFile(`REVERT REASON - ${revertReason}`);
-        }
+        throw new Error(`Failed to send TX EthereumYear: ${error.message}`);
     }
 }
 
